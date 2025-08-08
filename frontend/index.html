@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automatyzacja Faktur</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="container mt-4">
+
+    <h1>Narzędzie do Faktur</h1>
+
+    <div class="row mb-4">
+        <div class="col-md-6 mb-4 mb-md-0">
+            <div class="card h-100">
+                <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">Pamiętaj małolat, faktura musi się sensownie nazywać.</h5>
+                    <p class="card-text">Weź coś przekmiń</p>
+                    <div class="mb-3">
+                        <label for="fileSelect" class="form-label">Wybierz plik PDF z sortowni:</label>
+                        <select id="fileSelect" class="form-select"></select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="invoiceName" class="form-label">Nazwa</label>
+                        <input type="text" id="invoiceName" class="form-control" list="invoiceName-suggestions"
+                            placeholder="Wybierz z listy lub wpisz własną nazwę...">
+                        <datalist id="invoiceName-suggestions">
+                            <option value="superdevs">
+                            <option value="congitva">
+                            <option value="cognitiva przelew netto">
+                            <option value="cognitiva-przelew-vat">
+                            <option value="księgowy">
+                            <option value="paliwo tipo mol">
+                            <option value="wypożyczenie laptopa">
+                            <option value="autostrada">
+                        </datalist>
+                    </div>
+                    <div class="mb-3">
+                        <label for="invoiceDate" class="form-label">Data wystawienia faktury:</label>
+                        <input type="date" id="invoiceDate" class="form-control">
+                    </div>
+                    <button id="processBtn" class="btn btn-primary mt-auto">Zmień nazwę i przenieś</button>
+                    <div id="processStatus" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card border-primary h-100">
+                <div class="card-header fw-bold">Bez tych faktur nie przejdzie:</div>
+                <div class="card-body">
+                    <ul id="missingInvoicesList" class="list-group">
+                        </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mb-4">
+        <div class="col-md-6 mb-4 mb-md-0">
+            <div class="card h-100">
+                <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">Pakuj człeniu!</h5>
+                    <p>Spakuj wszystkie pliki z folderu "pakowalnia" do jednego archiwum ZIP w folderze "ZIP Skład".</p>
+                    <button id="packBtn" class="btn btn-info mt-auto">Spakuj pliki do ZIP</button>
+                    <div id="packStatus" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">Zipera w trasę!</h5>
+                    <p>Wyślij ostatnio utworzone archiwum ZIP do adresata.</p>
+                    <button id="sendEmailBtn" class="btn btn-success mt-auto" disabled>Wyślij e-mail</button>
+                    <div id="sendStatus" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Wyprostuj se obrazek</h5>
+            <p>Jeśli masz jakiś obrazek i chcesz z niego zrobić prawdziwego faceta weź se ko wyprostuj na pdf, albo bdf (ale to nie tutaj)</p>
+            <div class="mb-3">
+                <label for="imageUpload" class="form-label">Wybierz plik PNG lub JPG:</label>
+                <input class="form-control" type="file" id="imageUpload" accept="image/png, image/jpeg">
+            </div>
+            <button id="convertBtn" class="btn btn-dark">Wyprostuj do PDF</button>
+            <div id="convertStatus" class="mt-3"></div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="monthSelectModal" tabindex="-1" aria-labelledby="monthModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="monthModalLabel">Jaki miesiąc rozliczamy wariacie? 😎</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Wybierz miesiąc i rok, którego dotyczą faktury.</p>
+                    <input type="month" id="monthInput" class="form-control">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="button" id="confirmPackBtn" class="btn btn-primary">Zatwierdź i pakuj</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="imageFoundModal" tabindex="-1" aria-labelledby="imageModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content border-warning">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="imageModalLabel">⚠️ Wykryto podejrzany plik!</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    W sortowni pojawił się jakiś podejrzany typ identyfikujący się jako obrazek. Sprawdź czy go nie trzeba przyciąć!
+                    <p class="text-muted mt-2" id="imageFoundFilename"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" id="cropWaitBtn" class="btn btn-secondary" data-bs-dismiss="modal">Czekaj, obcinam</button>
+                    <button type="button" id="convertNowBtn" class="btn btn-warning">Gotowe, prostuj go!</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="script.js"></script>
+</body>
+
+</html>

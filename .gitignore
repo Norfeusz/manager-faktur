@@ -1,0 +1,22 @@
+# Zależności Node.js
+node_modules/
+
+# Pliki tymczasowe z uploadu i konwersji
+uploads/
+
+# Foldery z danymi roboczymi aplikacji
+sortownia/
+pakowalnia/
+"ZIP Skład/"
+
+# Pliki systemowe
+.DS_Store
+Thumbs.db
+
+# Pliki logów
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Zmienne środowiskowe (jeśli będziesz miał)
+.env
