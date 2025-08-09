@@ -14,7 +14,7 @@
     <h1>Narzędzie do Faktur</h1>
 
     <div class="row mb-4">
-        <div class="col-md-6 mb-4 mb-md-0">
+        <div class="col-md-7 mb-4 mb-md-0">
             <div class="card h-100">
                 <div class="card-body d-flex flex-column">
                     <h5 class="card-title">Pamiętaj małolat, faktura musi się sensownie nazywać.</h5>
@@ -42,18 +42,20 @@
                         <label for="invoiceDate" class="form-label">Data wystawienia faktury:</label>
                         <input type="date" id="invoiceDate" class="form-control">
                     </div>
-                    <button id="processBtn" class="btn btn-primary mt-auto">Zmień nazwę i przenieś</button>
+                    <div class="d-grid gap-2 d-sm-flex justify-content-sm-start mt-auto">
+                        <button id="addToZipBtn" class="btn btn-outline-primary btn-sm">Dodaj do członka ZIP składu</button>
+                        <button id="processBtn" class="btn btn-primary flex-grow-1">Zmień nazwę i przenieś</button>
+                    </div>
                     <div id="processStatus" class="mt-3"></div>
                 </div>
             </div>
         </div>
-
-        <div class="col-md-6">
+        <div class="col-md-5">
             <div class="card border-primary h-100">
                 <div class="card-header fw-bold">Bez tych faktur nie przejdzie:</div>
                 <div class="card-body">
                     <ul id="missingInvoicesList" class="list-group">
-                        </ul>
+                    </ul>
                 </div>
             </div>
         </div>
@@ -81,15 +83,16 @@
             </div>
         </div>
     </div>
+    
     <div class="card mb-4">
         <div class="card-body">
-            <h5 class="card-title">Wyprostuj se obrazek</h5>
-            <p>Jeśli masz jakiś obrazek i chcesz z niego zrobić prawdziwego faceta weź se ko wyprostuj na pdf, albo bdf (ale to nie tutaj)</p>
+            <h5 class="card-title">Krok 0: Konwerter PNG/JPG do PDF</h5>
+            <p>Jeśli otrzymałeś fakturę w formacie obrazu, możesz ją tutaj przekonwertować do formatu PDF. Plik trafi do sortowni.</p>
             <div class="mb-3">
                 <label for="imageUpload" class="form-label">Wybierz plik PNG lub JPG:</label>
                 <input class="form-control" type="file" id="imageUpload" accept="image/png, image/jpeg">
             </div>
-            <button id="convertBtn" class="btn btn-dark">Wyprostuj do PDF</button>
+            <button id="convertBtn" class="btn btn-dark">Konwertuj do PDF</button>
             <div id="convertStatus" class="mt-3"></div>
         </div>
     </div>
@@ -127,6 +130,25 @@
                 <div class="modal-footer">
                     <button type="button" id="cropWaitBtn" class="btn btn-secondary" data-bs-dismiss="modal">Czekaj, obcinam</button>
                     <button type="button" id="convertNowBtn" class="btn btn-warning">Gotowe, prostuj go!</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="zipSelectModal" tabindex="-1" aria-labelledby="zipModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="zipModalLabel">Wybierz członka ZIP składu</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Do którego archiwum chcesz dodać ten plik?</p>
+                    <select id="zipFileSelect" class="form-select"></select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Anuluj</button>
+                    <button type="button" id="confirmAddToZipBtn" class="btn btn-primary">Dodaj plik</button>
                 </div>
             </div>
         </div>

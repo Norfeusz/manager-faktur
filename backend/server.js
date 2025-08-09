@@ -8,23 +8,22 @@ const archiver = require('archiver');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
 const { PDFDocument } = require('pdf-lib');
+const AdmZip = require('adm-zip');
 
 const app = express();
 const PORT = 3000;
 
 app.use(cors());
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
+const FOLDER_SORTOWNIA = path.join(__dirname, '..', 'sortownia'); 
+const FOLDER_PAKOWALNIA = path.join(__dirname, '..', 'pakowalnia');
+const FOLDER_ZIP_SKLAD = path.join(__dirname, '..', 'ZIP Skład');
+app.use('/files', express.static(FOLDER_SORTOWNIA));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 const upload = multer({ dest: 'uploads/' });
 if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
-
-// --- ŚCIEŻKI DO FOLDERÓW ---
-const FOLDER_SORTOWNIA = path.join(__dirname, '..', 'sortownia'); 
-const FOLDER_PAKOWALNIA = path.join(__dirname, '..', 'pakowalnia');
-const FOLDER_ZIP_SKLAD = path.join(__dirname, '..', 'ZIP Skład');
-
 if (!fs.existsSync(FOLDER_PAKOWALNIA)) fs.mkdirSync(FOLDER_PAKOWALNIA);
 if (!fs.existsSync(FOLDER_SORTOWNIA)) fs.mkdirSync(FOLDER_SORTOWNIA);
 if (!fs.existsSync(FOLDER_ZIP_SKLAD)) fs.mkdirSync(FOLDER_ZIP_SKLAD);
@@ -32,21 +31,49 @@ if (!fs.existsSync(FOLDER_ZIP_SKLAD)) fs.mkdirSync(FOLDER_ZIP_SKLAD);
 
 // --- ENDPOINTS (PUNKTY DOSTĘPOWE API) ---
 
+// Endpoint - listowanie istniejących plików ZIP
+app.get('/api/get-zips', async (req, res) => {
+    try {
+        const files = await fsp.readdir(FOLDER_ZIP_SKLAD);
+        const zipFiles = files.filter(file => path.extname(file).toLowerCase() === '.zip');
+        res.json(zipFiles);
+    } catch (error) {
+        console.error("Błąd odczytu folderu ZIP Skład:", error);
+        res.status(500).send("Nie można odczytać listy archiwów.");
+    }
+});
+
+// Endpoint - dodawanie pliku do istniejącego ZIPa
+app.post('/api/add-to-zip', async (req, res) => {
+    const { originalFilename, newName, invoiceDate, zipFilename } = req.body;
+    if (!originalFilename || !newName || !invoiceDate || !zipFilename) {
+        return res.status(400).json({ message: 'Brak wszystkich wymaganych danych.' });
+    }
+    const sourcePath = path.join(FOLDER_SORTOWNIA, originalFilename);
+    const targetZipPath = path.join(FOLDER_ZIP_SKLAD, zipFilename);
+    const finalInvoiceName = `${invoiceDate}_${newName.replace(/ /g, '-')}.pdf`;
+    try {
+        if (!fs.existsSync(sourcePath)) throw new Error(`Plik źródłowy ${originalFilename} nie istnieje.`);
+        if (!fs.existsSync(targetZipPath)) throw new Error(`Archiwum ${zipFilename} nie istnieje.`);
+        const fileBuffer = await fsp.readFile(sourcePath);
+        const zip = new AdmZip(targetZipPath);
+        zip.addFile(finalInvoiceName, fileBuffer);
+        zip.writeZip(targetZipPath);
+        await fsp.unlink(sourcePath);
+        res.json({ message: `Plik ${finalInvoiceName} został pomyślnie dodany do archiwum ${zipFilename}.` });
+    } catch (error) {
+        console.error("Błąd podczas dodawania do ZIP:", error);
+        res.status(500).json({ message: `Nie udało się dodać pliku do archiwum: ${error.message}` });
+    }
+});
+
 // Endpoint do automatycznego przeniesienia pliku
 app.post('/api/auto-move-file', (req, res) => {
     const { filename } = req.body;
-    if (!filename) {
-        return res.status(400).send('Nie podano nazwy pliku.');
-    }
-
+    if (!filename) return res.status(400).send('Nie podano nazwy pliku.');
     const oldPath = path.join(FOLDER_SORTOWNIA, filename);
-    // ZMIENIONA LINIA - używamy path.basename, aby pozbyć się ewentualnych podfolderów
     const newPath = path.join(FOLDER_PAKOWALNIA, path.basename(filename));
-
-    if (!fs.existsSync(oldPath)) {
-        return res.status(404).send(`Plik ${filename} nie został znaleziony w sortowni.`);
-    }
-
+    if (!fs.existsSync(oldPath)) return res.status(404).send(`Plik ${filename} nie został znaleziony w sortowni.`);
     fs.rename(oldPath, newPath, (err) => {
         if (err) {
             console.error(`Błąd podczas automatycznego przenoszenia pliku ${filename}:`, err);
@@ -55,8 +82,6 @@ app.post('/api/auto-move-file', (req, res) => {
         res.send({ message: `Plik ${path.basename(filename)} został automatycznie przeniesiony do pakowalni.` });
     });
 });
-
-// ... (reszta endpointów pozostaje bez zmian, ale jest wklejona poniżej dla kompletności) ...
 
 // Endpoint konwertera obrazów z uploadu
 app.post('/api/convert-to-pdf', upload.single('imageFile'), async (req, res) => {
@@ -155,7 +180,7 @@ app.post('/api/pack-files', (req, res) => {
     const polishMonths = ['styczen', 'luty', 'marzec', 'kwiecien', 'maj', 'czerwiec', 'lipiec', 'sierpien', 'wrzesien', 'pazdziernik', 'listopad', 'grudzien'];
     const monthName = polishMonths[month - 1]; 
     if (!monthName) return res.status(400).json({ message: 'Nieprawidłowy numer miesiąca.' });
-    const zipName = `kamil-warchoł-faktury-${monthName}-${year}.zip`;
+    const zipName = `kamil-warchol-faktury-${monthName}-${year}.zip`;
     const outputPath = path.join(FOLDER_ZIP_SKLAD, zipName);
     const output = fs.createWriteStream(outputPath);
     const archive = archiver('zip', { zlib: { level: 9 } });

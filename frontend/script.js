@@ -9,6 +9,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const missingInvoicesList = document.getElementById('missingInvoicesList');
     const imageUpload = document.getElementById('imageUpload');
     const convertBtn = document.getElementById('convertBtn');
+    const addToZipBtn = document.getElementById('addToZipBtn');
+    const zipSelectModalEl = document.getElementById('zipSelectModal');
+    const zipSelectModal = new bootstrap.Modal(zipSelectModalEl);
+    const zipFileSelect = document.getElementById('zipFileSelect');
+    const confirmAddToZipBtn = document.getElementById('confirmAddToZipBtn');
 
     // Modale
     const monthSelectModalEl = document.getElementById('monthSelectModal');
@@ -31,7 +36,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let missingItemsState = [];
     let latestZipFile = null;
 
-    // ZMODYFIKOWANA FUNKCJA - teraz przyjmuje ID elementu, w którym ma wyświetlić status
+    // --- DEFINICJE FUNKCJI ---
+
     const showStatus = (targetId, message, isError = false) => {
         const statusDiv = document.getElementById(targetId);
         if (statusDiv) {
@@ -92,13 +98,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return;
             }
-            
             const pdfFiles = files.filter(file => path.extname(file).toLowerCase() === '.pdf');
             const otherImageFiles = files.filter(file => {
                 const ext = path.extname(file).toLowerCase();
                 return ext === '.png' || ext === '.jpg' || ext === '.jpeg';
             });
-
             fileSelect.innerHTML = '<option selected disabled>Wybierz plik...</option>';
             pdfFiles.forEach(file => {
                 const option = document.createElement('option');
@@ -106,7 +110,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 option.textContent = file;
                 fileSelect.appendChild(option);
             });
-
             if (otherImageFiles.length > 0) {
                 const imageToProcess = otherImageFiles[0];
                 imageFoundFilenameEl.textContent = `Plik: ${imageToProcess}`;
@@ -117,6 +120,8 @@ document.addEventListener('DOMContentLoaded', () => {
             showStatus('processStatus', 'Błąd podczas ładowania plików z sortowni.', true);
         }
     };
+
+    // --- LOGIKA PRZYCISKÓW I ZDARZEŃ ---
 
     processBtn.addEventListener('click', async () => {
         const data = {
@@ -170,6 +175,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const result = await response.json();
             if (!response.ok) throw new Error(result.message || 'Błąd serwera.');
+            
             showStatus('packStatus', result.message, false);
             latestZipFile = result.zipFilename;
             sendEmailBtn.disabled = false;
@@ -195,6 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const result = await response.json();
             if (!response.ok) throw new Error(result.message || 'Błąd serwera.');
+            
             showStatus('sendStatus', result.message, false);
             sendEmailBtn.disabled = true;
             latestZipFile = null;
@@ -219,6 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const result = await response.json();
             if (!response.ok) throw new Error(result.message || 'Błąd serwera.');
+            
             showStatus('convertStatus', result.message, false);
             imageUpload.value = '';
             loadFiles();
@@ -251,10 +259,93 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    fileSelect.addEventListener('change', () => {
+        const selectedFile = fileSelect.value;
+        if (selectedFile && selectedFile !== 'Wybierz plik...') {
+            const encodedFile = selectedFile.split('/').map(encodeURIComponent).join('/');
+            const fileUrl = `http://localhost:3000/files/${encodedFile}`;
+            window.open(fileUrl, '_blank');
+        }
+    });
+
+    addToZipBtn.addEventListener('click', async () => {
+        const data = {
+            originalFilename: fileSelect.value,
+            newName: invoiceNameInput.value,
+            invoiceDate: invoiceDateInput.value
+        };
+        if (!data.originalFilename || data.originalFilename === 'Wybierz plik...' || !data.newName || !data.invoiceDate) {
+            showStatus('processStatus', 'Wypełnij wszystkie pola (plik, nazwa, data) przed dodaniem do ZIP!', true);
+            return;
+        }
+        try {
+            const response = await fetch('http://localhost:3000/api/get-zips');
+            if (!response.ok) throw new Error('Nie udało się pobrać listy archiwów.');
+            const zipFiles = await response.json();
+            if (zipFiles.length === 0) {
+                showStatus('processStatus', 'Brak dostępnych archiwów w folderze ZIP Skład. Najpierw stwórz jakieś.', true);
+                return;
+            }
+            zipFileSelect.innerHTML = '';
+            zipFiles.forEach(zipFile => {
+                const option = document.createElement('option');
+                option.value = zipFile;
+                option.textContent = zipFile;
+                zipFileSelect.appendChild(option);
+            });
+            zipSelectModal.show();
+        } catch(error) {
+            showStatus('processStatus', `Błąd: ${error.message}`, true);
+        }
+    });
+
+    confirmAddToZipBtn.addEventListener('click', async () => {
+        const data = {
+            originalFilename: fileSelect.value,
+            newName: invoiceNameInput.value,
+            invoiceDate: invoiceDateInput.value,
+            zipFilename: zipFileSelect.value
+        };
+        if (!data.zipFilename) {
+            alert('Wybierz archiwum!');
+            return;
+        }
+        zipSelectModal.hide();
+        showStatus('processStatus', `Dodawanie pliku do ${data.zipFilename}...`, false);
+        try {
+            const response = await fetch('http://localhost:3000/api/add-to-zip', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message);
+            showStatus('processStatus', result.message, false);
+            invoiceNameInput.value = '';
+            invoiceDateInput.value = '';
+            loadFiles();
+        } catch (error) {
+            showStatus('processStatus', `Błąd: ${error.message}`, true);
+        }
+    });
+
+    // NOWY BLOK KODU - WYMUSZENIE POKAZANIA KALENDARZA
+    invoiceDateInput.addEventListener('click', () => {
+        try {
+            invoiceDateInput.showPicker();
+        } catch (error) {
+            // W przeglądarkach, które nie wspierają showPicker(),
+            // błąd zostanie zignorowany, a pole zachowa swoje standardowe działanie.
+            console.log('Twoja przeglądarka nie wspiera showPicker().');
+        }
+    });
+
+    // Inicjalizacja przy starcie aplikacji
     loadFiles();
     updateMissingInvoices();
 });
 
+// Polyfill dla path.extname w przeglądarce
 const path = {
     extname: (p) => {
         const i = p.lastIndexOf('.');
