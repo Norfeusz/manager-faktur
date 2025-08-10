@@ -1,57 +1,100 @@
 // Import potrzebnych bibliotek
 const express = require('express');
+const { exec } = require('child_process');
 const multer = require('multer');
 const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
 const archiver = require('archiver');
-const nodemailer = require('nodemailer');
-const cors = require('cors');
 const { PDFDocument } = require('pdf-lib');
 const AdmZip = require('adm-zip');
+const cors = require('cors');
 
 const app = express();
 const PORT = 3000;
+
+// ##########################################################################
+// ## UWAGA! ZNAJDŹ I ZAKTUALIZUJ PONIŻSZĄ ŚCIEŻKĘ DO PROGRAMU GIMP ##
+// ##########################################################################
+const GIMP_PATH = '"C:\\Program Files\\GIMP 2\\bin\\gimp-2.10.exe"';
 
 app.use(cors());
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 const FOLDER_SORTOWNIA = path.join(__dirname, '..', 'sortownia'); 
 const FOLDER_PAKOWALNIA = path.join(__dirname, '..', 'pakowalnia');
 const FOLDER_ZIP_SKLAD = path.join(__dirname, '..', 'ZIP Skład');
+const FOLDER_UPLOADS = path.join(__dirname, '..', 'uploads');
 app.use('/files', express.static(FOLDER_SORTOWNIA));
+app.use('/packed', express.static(FOLDER_PAKOWALNIA));
+
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+const upload = multer({ dest: FOLDER_UPLOADS });
 
-const upload = multer({ dest: 'uploads/' });
-if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
+if (!fs.existsSync(FOLDER_UPLOADS)) fs.mkdirSync(FOLDER_UPLOADS);
 if (!fs.existsSync(FOLDER_PAKOWALNIA)) fs.mkdirSync(FOLDER_PAKOWALNIA);
 if (!fs.existsSync(FOLDER_SORTOWNIA)) fs.mkdirSync(FOLDER_SORTOWNIA);
 if (!fs.existsSync(FOLDER_ZIP_SKLAD)) fs.mkdirSync(FOLDER_ZIP_SKLAD);
 
 
-// --- ENDPOINTS (PUNKTY DOSTĘPOWE API) ---
+// --- ENDPOINTS ---
 
-// Endpoint - listowanie istniejących plików ZIP
-app.get('/api/get-zips', async (req, res) => {
-    try {
-        const files = await fsp.readdir(FOLDER_ZIP_SKLAD);
-        const zipFiles = files.filter(file => path.extname(file).toLowerCase() === '.zip');
-        res.json(zipFiles);
-    } catch (error) {
-        console.error("Błąd odczytu folderu ZIP Skład:", error);
-        res.status(500).send("Nie można odczytać listy archiwów.");
-    }
+app.post('/api/open-in-gimp', (req, res) => {
+    const { filename, folder } = req.body;
+    if (!filename || !folder) return res.status(400).json({ message: 'Nie podano nazwy pliku lub folderu.' });
+    
+    const baseFolder = folder === 'sortownia' ? FOLDER_SORTOWNIA : FOLDER_PAKOWALNIA;
+    const fullPath = path.join(baseFolder, filename);
+
+    if (!fs.existsSync(fullPath)) return res.status(404).json({ message: `Nie znaleziono pliku: ${fullPath}` });
+
+    const command = `${GIMP_PATH} "${fullPath}"`;
+    exec(command, (error) => {
+        if (error) {
+            console.error(`Błąd przy próbie uruchomienia GIMPa: ${error.message}`);
+            return res.status(500).json({ message: `Nie udało się uruchomić GIMPa. Sprawdź, czy ścieżka w pliku server.js jest poprawna.` });
+        }
+        res.json({ message: `Polecenie otwarcia pliku ${filename} w GIMP zostało wysłane.` });
+    });
 });
 
-// Endpoint - dodawanie pliku do istniejącego ZIPa
+app.post('/api/process-invoice', (req, res) => {
+    const { originalFilename, newName, invoiceDate } = req.body;
+    if (!originalFilename || !newName || !invoiceDate) return res.status(400).send('Brak wszystkich wymaganych danych.');
+    const extension = path.extname(originalFilename);
+    const oldPath = path.join(FOLDER_SORTOWNIA, originalFilename);
+    const newFilename = `${invoiceDate}_${newName.replace(/ /g, '-')}${extension}`;
+    const newPath = path.join(FOLDER_PAKOWALNIA, newFilename);
+    fs.rename(oldPath, newPath, (err) => {
+        if (err) return res.status(500).send('Nie udało się przenieść pliku.');
+        res.send({ message: `Plik ${newFilename} został pomyślnie przeniesiony.` });
+    });
+});
+
+app.post('/api/custom-rename', (req, res) => {
+    const { originalFilename, customFilename } = req.body;
+    if (!originalFilename || !customFilename) return res.status(400).json({ message: 'Brak wszystkich wymaganych danych.' });
+    const extension = path.extname(originalFilename);
+    let finalCustomName = customFilename;
+    if (!path.extname(finalCustomName)) {
+        finalCustomName += extension;
+    }
+    const oldPath = path.join(FOLDER_SORTOWNIA, originalFilename);
+    const newPath = path.join(FOLDER_PAKOWALNIA, finalCustomName);
+    if (!fs.existsSync(oldPath)) return res.status(404).json({ message: `Plik ${originalFilename} nie został znaleziony.`});
+    fs.rename(oldPath, newPath, (err) => {
+        if (err) return res.status(500).json({ message: 'Nie udało się przenieść pliku o niestandardowej nazwie.' });
+        res.send({ message: `Plik został pomyślnie przeniesiony jako ${finalCustomName}.` });
+    });
+});
+
 app.post('/api/add-to-zip', async (req, res) => {
     const { originalFilename, newName, invoiceDate, zipFilename } = req.body;
-    if (!originalFilename || !newName || !invoiceDate || !zipFilename) {
-        return res.status(400).json({ message: 'Brak wszystkich wymaganych danych.' });
-    }
+    if (!originalFilename || !newName || !invoiceDate || !zipFilename) return res.status(400).json({ message: 'Brak wszystkich wymaganych danych.' });
+    const extension = path.extname(originalFilename);
     const sourcePath = path.join(FOLDER_SORTOWNIA, originalFilename);
     const targetZipPath = path.join(FOLDER_ZIP_SKLAD, zipFilename);
-    const finalInvoiceName = `${invoiceDate}_${newName.replace(/ /g, '-')}.pdf`;
+    const finalInvoiceName = `${invoiceDate}_${newName.replace(/ /g, '-')}${extension}`;
     try {
         if (!fs.existsSync(sourcePath)) throw new Error(`Plik źródłowy ${originalFilename} nie istnieje.`);
         if (!fs.existsSync(targetZipPath)) throw new Error(`Archiwum ${zipFilename} nie istnieje.`);
@@ -60,14 +103,22 @@ app.post('/api/add-to-zip', async (req, res) => {
         zip.addFile(finalInvoiceName, fileBuffer);
         zip.writeZip(targetZipPath);
         await fsp.unlink(sourcePath);
-        res.json({ message: `Plik ${finalInvoiceName} został pomyślnie dodany do archiwum ${zipFilename}.` });
+        res.json({ message: `Plik ${finalInvoiceName} został dodany do archiwum ${zipFilename}.` });
     } catch (error) {
-        console.error("Błąd podczas dodawania do ZIP:", error);
         res.status(500).json({ message: `Nie udało się dodać pliku do archiwum: ${error.message}` });
     }
 });
 
-// Endpoint do automatycznego przeniesienia pliku
+app.get('/api/get-zips', async (req, res) => {
+    try {
+        const files = await fsp.readdir(FOLDER_ZIP_SKLAD);
+        const zipFiles = files.filter(file => path.extname(file).toLowerCase() === '.zip');
+        res.json(zipFiles);
+    } catch (error) {
+        res.status(500).send("Nie można odczytać listy archiwów.");
+    }
+});
+
 app.post('/api/auto-move-file', (req, res) => {
     const { filename } = req.body;
     if (!filename) return res.status(400).send('Nie podano nazwy pliku.');
@@ -75,15 +126,11 @@ app.post('/api/auto-move-file', (req, res) => {
     const newPath = path.join(FOLDER_PAKOWALNIA, path.basename(filename));
     if (!fs.existsSync(oldPath)) return res.status(404).send(`Plik ${filename} nie został znaleziony w sortowni.`);
     fs.rename(oldPath, newPath, (err) => {
-        if (err) {
-            console.error(`Błąd podczas automatycznego przenoszenia pliku ${filename}:`, err);
-            return res.status(500).send('Nie udało się automatycznie przenieść pliku.');
-        }
+        if (err) return res.status(500).send('Nie udało się automatycznie przenieść pliku.');
         res.send({ message: `Plik ${path.basename(filename)} został automatycznie przeniesiony do pakowalni.` });
     });
 });
 
-// Endpoint konwertera obrazów z uploadu
 app.post('/api/convert-to-pdf', upload.single('imageFile'), async (req, res) => {
     if (!req.file) return res.status(400).json({ message: 'Nie przesłano pliku.' });
     try {
@@ -101,15 +148,13 @@ app.post('/api/convert-to-pdf', upload.single('imageFile'), async (req, res) => 
         const pdfOutputPath = path.join(FOLDER_SORTOWNIA, `${originalName}.pdf`);
         await fsp.writeFile(pdfOutputPath, pdfBytes);
         await fsp.unlink(imagePath);
-        res.json({ message: `Plik ${originalName}.pdf został pomyślnie utworzony i zapisany w sortowni.` });
+        res.json({ message: `Plik ${originalName}.pdf został pomyślnie utworzony.` });
     } catch (error) {
-        console.error("Błąd konwersji:", error);
         if (req.file) await fsp.unlink(req.file.path).catch(e => console.error("Błąd usuwania pliku tymczasowego:", e));
         res.status(500).json({ message: error.message });
     }
 });
 
-// Endpoint do konwersji pliku już istniejącego na serwerze
 app.post('/api/convert-server-file', async (req, res) => {
     const { filename } = req.body;
     if (!filename) return res.status(400).json({ message: 'Nie podano nazwy pliku.' });
@@ -132,48 +177,19 @@ app.post('/api/convert-server-file', async (req, res) => {
         await fsp.unlink(imagePath);
         res.json({ message: `Plik ${originalName}.pdf został pomyślnie utworzony.` });
     } catch (error) {
-        console.error("Błąd konwersji pliku serwera:", error);
         res.status(500).json({ message: error.message });
     }
 });
 
-// Endpoint do pobierania listy plików w sortowni
 app.get('/api/get-files', async (req, res) => {
-    const tempSubfolder = '.tmp.drivedownload';
-    const tempDirPath = path.join(FOLDER_SORTOWNIA, tempSubfolder);
-    let allFiles = [];
     try {
-        const mainFiles = await fsp.readdir(FOLDER_SORTOWNIA);
-        allFiles.push(...mainFiles.filter(file => file !== tempSubfolder));
-        if (fs.existsSync(tempDirPath)) {
-            const tempFiles = await fsp.readdir(tempDirPath);
-            const tempFilesWithPrefix = tempFiles.map(file => path.join(tempSubfolder, file));
-            allFiles.push(...tempFilesWithPrefix);
-        }
-        res.json(allFiles);
+        const files = await fsp.readdir(FOLDER_SORTOWNIA);
+        res.json(files);
     } catch (err) {
-        console.error("Błąd odczytu folderu sortowni:", err);
-        return res.status(500).send('Nie można odczytać folderu sortowni.');
+        res.status(500).send('Nie można odczytać folderu sortowni.');
     }
 });
 
-// Endpoint do zmiany nazwy i przeniesienia pliku
-app.post('/api/process-invoice', (req, res) => {
-    const { originalFilename, newName, invoiceDate } = req.body;
-    if (!originalFilename || !newName || !invoiceDate) return res.status(400).send('Brak wszystkich wymaganych danych.');
-    const oldPath = path.join(FOLDER_SORTOWNIA, originalFilename);
-    const newFilename = `${invoiceDate}_${newName.replace(/ /g, '-')}.pdf`;
-    const newPath = path.join(FOLDER_PAKOWALNIA, newFilename);
-    fs.rename(oldPath, newPath, (err) => {
-        if (err) {
-            console.error(err);
-            return res.status(500).send('Nie udało się przenieść pliku.');
-        }
-        res.send({ message: `Plik ${newFilename} został pomyślnie przeniesiony.` });
-    });
-});
-
-// Endpoint do pakowania plików
 app.post('/api/pack-files', (req, res) => {
     const { year, month } = req.body;
     if (!year || !month) return res.status(400).json({ message: 'Brak informacji o miesiącu lub roku.' });
@@ -185,12 +201,10 @@ app.post('/api/pack-files', (req, res) => {
     const output = fs.createWriteStream(outputPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
     output.on('close', async () => {
-        console.log(`Archiwum ${zipName} stworzone. Rozmiar: ${archive.pointer()} bajtów.`);
         try {
             const filesToClear = await fsp.readdir(FOLDER_PAKOWALNIA);
             const unlinkPromises = filesToClear.map(file => fsp.unlink(path.join(FOLDER_PAKOWALNIA, file)));
             await Promise.all(unlinkPromises);
-            console.log(`Folder ${FOLDER_PAKOWALNIA} został wyczyszczony.`);
         } catch (clearErr) {
             console.error("Błąd podczas czyszczenia folderu pakowalni:", clearErr);
         }
@@ -202,28 +216,161 @@ app.post('/api/pack-files', (req, res) => {
     res.send({ message: `Rozpoczęto tworzenie archiwum ${zipName}.`, zipFilename: zipName });
 });
 
-// Endpoint do pobierania listy plików w pakowalni
 app.get('/api/get-packed-files', (req, res) => {
     fs.readdir(FOLDER_PAKOWALNIA, (err, files) => {
-        if (err) {
-            console.error("Błąd odczytu folderu pakowalni:", err);
-            return res.status(500).send('Nie można odczytać folderu pakowalni.');
-        }
+        if (err) return res.status(500).send('Nie można odczytać folderu pakowalni.');
         res.json(files);
     });
 });
 
-// Endpoint do wysyłania maila
 app.post('/api/send-email', (req, res) => {
     const { zipFilename } = req.body;
     if (!zipFilename) return res.status(400).json({ message: 'Nie podano nazwy pliku ZIP.' });
     const zipPath = path.join(FOLDER_ZIP_SKLAD, zipFilename);
     if (!fs.existsSync(zipPath)) return res.status(404).json({ message: 'Nie znaleziono podanego pliku ZIP.' });
-    console.log(`Symulacja wysyłki maila z załącznikiem: ${zipPath}`);
     res.send({ message: `E-mail z plikiem ${zipFilename} został pomyślnie wysłany (symulacja).` });
 });
 
-// Uruchomienie serwera
+app.post('/api/move-to-sortownia', (req, res) => {
+    const { filename } = req.body;
+    const oldPath = path.join(FOLDER_PAKOWALNIA, filename);
+    const newPath = path.join(FOLDER_SORTOWNIA, filename);
+    fs.rename(oldPath, newPath, (err) => {
+        if (err) return res.status(500).json({ message: 'Błąd podczas przenoszenia pliku.' });
+        res.json({ message: `Plik ${filename} został cofnięty do sortowni.` });
+    });
+});
+
+app.delete('/api/delete-file', (req, res) => {
+    const { filename, folder } = req.body;
+    const baseFolder = folder === 'pakowalnia' ? FOLDER_PAKOWALNIA : FOLDER_SORTOWNIA;
+    const filePath = path.join(baseFolder, filename);
+    fs.unlink(filePath, (err) => {
+        if (err) return res.status(500).json({ message: 'Błąd podczas usuwania pliku.' });
+        res.json({ message: `Plik ${filename} został usunięty.` });
+    });
+});
+
+app.post('/api/rename-packed-file', (req, res) => {
+    const { oldFilename, newFilename } = req.body;
+    const oldPath = path.join(FOLDER_PAKOWALNIA, oldFilename);
+    const newPath = path.join(FOLDER_PAKOWALNIA, newFilename);
+    fs.rename(oldPath, newPath, (err) => {
+        if (err) return res.status(500).json({ message: 'Błąd podczas zmiany nazwy.' });
+        res.json({ message: 'Nazwa pliku została zmieniona.' });
+    });
+});
+
+app.post('/api/add-packed-to-zip', async (req, res) => {
+    const { packedFilename, zipFilename } = req.body;
+    const sourcePath = path.join(FOLDER_PAKOWALNIA, packedFilename);
+    const targetZipPath = path.join(FOLDER_ZIP_SKLAD, zipFilename);
+    try {
+        const fileBuffer = await fsp.readFile(sourcePath);
+        const zip = new AdmZip(targetZipPath);
+        zip.addFile(packedFilename, fileBuffer);
+        zip.writeZip(targetZipPath);
+        res.json({ message: `Plik ${packedFilename} został dodany do archiwum ${zipFilename}.` });
+    } catch (error) {
+        res.status(500).json({ message: `Nie udało się dodać pliku do archiwum: ${error.message}` });
+    }
+});
+
+app.get('/api/get-zip-contents', (req, res) => {
+    const { zipFilename } = req.query;
+    if (!zipFilename) return res.status(400).json({ message: "Nie podano nazwy archiwum." });
+    const zipPath = path.join(FOLDER_ZIP_SKLAD, zipFilename);
+    try {
+        if (!fs.existsSync(zipPath)) throw new Error("Archiwum nie istnieje.");
+        const zip = new AdmZip(zipPath);
+        const zipEntries = zip.getEntries().map(entry => ({ name: entry.entryName, isDirectory: entry.isDirectory }));
+        res.json(zipEntries);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+app.post('/api/rename-zip', async (req, res) => {
+    const { oldZipFilename, newZipFilename } = req.body;
+    if (!oldZipFilename || !newZipFilename) return res.status(400).json({ message: "Brak danych." });
+    const oldPath = path.join(FOLDER_ZIP_SKLAD, oldZipFilename);
+    const newPath = path.join(FOLDER_ZIP_SKLAD, newZipFilename);
+    try {
+        await fsp.rename(oldPath, newPath);
+        res.json({ message: 'Nazwa archiwum została zmieniona.' });
+    } catch (error) {
+        res.status(500).json({ message: 'Błąd podczas zmiany nazwy archiwum.' });
+    }
+});
+
+app.post('/api/extract-zip', (req, res) => {
+    const { zipFilename } = req.body;
+    const zipPath = path.join(FOLDER_ZIP_SKLAD, zipFilename);
+    try {
+        const zip = new AdmZip(zipPath);
+        // Poprawiona, bardziej niezawodna metoda wypakowywania
+        zip.getEntries().forEach(entry => {
+            zip.extractEntryTo(entry, FOLDER_SORTOWNIA, false, true);
+        });
+        res.json({ message: `Archiwum ${zipFilename} zostało wypakowane do sortowni.` });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+app.delete('/api/delete-zip', async (req, res) => {
+    const { zipFilename } = req.body;
+    const zipPath = path.join(FOLDER_ZIP_SKLAD, zipFilename);
+    try {
+        await fsp.unlink(zipPath);
+        res.json({ message: `Archiwum ${zipFilename} zostało usunięte.` });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+app.post('/api/delete-file-from-zip', (req, res) => {
+    const { zipFilename, internalFilename } = req.body;
+    const zipPath = path.join(FOLDER_ZIP_SKLAD, zipFilename);
+    try {
+        const zip = new AdmZip(zipPath);
+        zip.deleteFile(internalFilename);
+        zip.writeZip(zipPath);
+        res.json({ message: `Plik ${internalFilename} został usunięty z archiwum.` });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+app.post('/api/extract-single-file', (req, res) => {
+    const { zipFilename, internalFilename } = req.body;
+    const zipPath = path.join(FOLDER_ZIP_SKLAD, zipFilename);
+    try {
+        const zip = new AdmZip(zipPath);
+        zip.extractEntryTo(internalFilename, FOLDER_SORTOWNIA, false, true);
+        res.json({ message: `Plik ${internalFilename} został wypakowany do sortowni.` });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+app.get('/api/view-file-in-zip', (req, res) => {
+    const { zipFilename, internalFilename } = req.query;
+    const zipPath = path.join(FOLDER_ZIP_SKLAD, zipFilename);
+    try {
+        const zip = new AdmZip(zipPath);
+        const fileData = zip.readFile(internalFilename);
+        if (fileData) {
+            res.contentType(path.extname(internalFilename));
+            res.send(fileData);
+        } else {
+            throw new Error('Nie znaleziono pliku w archiwum.');
+        }
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
 app.listen(PORT, () => {
     console.log(`Serwer działa na http://localhost:${PORT}`);
 });

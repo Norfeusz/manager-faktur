@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Automatyzacja Faktur</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -14,13 +15,13 @@
     <h1>Narzędzie do Faktur</h1>
 
     <div class="row mb-4">
-        <div class="col-md-7 mb-4 mb-md-0">
+        <div class="col-md-8 mb-4 mb-md-0">
             <div class="card h-100">
                 <div class="card-body d-flex flex-column">
                     <h5 class="card-title">Pamiętaj małolat, faktura musi się sensownie nazywać.</h5>
                     <p class="card-text">Weź coś przekmiń</p>
                     <div class="mb-3">
-                        <label for="fileSelect" class="form-label">Wybierz plik PDF z sortowni:</label>
+                        <label for="fileSelect" class="form-label">Wybierz plik z sortowni:</label>
                         <select id="fileSelect" class="form-select"></select>
                     </div>
                     <div class="mb-3">
@@ -42,15 +43,26 @@
                         <label for="invoiceDate" class="form-label">Data wystawienia faktury:</label>
                         <input type="date" id="invoiceDate" class="form-control">
                     </div>
-                    <div class="d-grid gap-2 d-sm-flex justify-content-sm-start mt-auto">
-                        <button id="addToZipBtn" class="btn btn-outline-primary btn-sm">Dodaj do członka ZIP składu</button>
-                        <button id="processBtn" class="btn btn-primary flex-grow-1">Zmień nazwę i przenieś</button>
+
+                    <div class="row g-2 mt-auto">
+                        <div class="col-sm-4">
+                            <div class="d-grid gap-2">
+                                <button id="addToZipBtn" class="btn btn-dark-red">Dodaj do ZIP</button>
+                                <button id="customNameBtn" class="btn btn-secondary">Nazwa niestandardowa</button>
+                            </div>
+                        </div>
+                        <div class="col-sm-8">
+                            <div class="d-grid h-100">
+                                <button id="processBtn" class="btn btn-primary">Zmień nazwę i przenieś</button>
+                            </div>
+                        </div>
                     </div>
+
                     <div id="processStatus" class="mt-3"></div>
                 </div>
             </div>
         </div>
-        <div class="col-md-5">
+        <div class="col-md-4">
             <div class="card border-primary h-100">
                 <div class="card-header fw-bold">Bez tych faktur nie przejdzie:</div>
                 <div class="card-body">
@@ -66,8 +78,11 @@
             <div class="card h-100">
                 <div class="card-body d-flex flex-column">
                     <h5 class="card-title">Pakuj człeniu!</h5>
-                    <p>Spakuj wszystkie pliki z folderu "pakowalnia" do jednego archiwum ZIP w folderze "ZIP Skład".</p>
-                    <button id="packBtn" class="btn btn-info mt-auto">Spakuj pliki do ZIP</button>
+                    <p>Spakuj wszystkie pliki z folderu "pakowalnia" lub zarządzaj nimi.</p>
+                    <div class="d-grid gap-2 d-sm-flex mt-auto">
+                        <button id="showPackedFilesBtn" class="btn btn-brown">Pokaż mi swoje towary</button>
+                        <button id="packBtn" class="btn btn-info flex-grow-1">Spakuj pliki do ZIP</button>
+                    </div>
                     <div id="packStatus" class="mt-3"></div>
                 </div>
             </div>
@@ -75,9 +90,12 @@
         <div class="col-md-6">
             <div class="card h-100">
                 <div class="card-body d-flex flex-column">
-                    <h5 class="card-title">Zipera w trasę!</h5>
-                    <p>Wyślij ostatnio utworzone archiwum ZIP do adresata.</p>
-                    <button id="sendEmailBtn" class="btn btn-success mt-auto" disabled>Wyślij e-mail</button>
+                    <h5 class="card-title">Zipera!</h5>
+                    <p>Zarządzaj gotowymi archiwami lub wyślij ostatnie do adresata.</p>
+                    <div class="d-grid gap-2 d-sm-flex mt-auto">
+                        <button id="showZipManagerBtn" class="btn btn-dark">Pokaż ZIP Skład</button>
+                        <button id="sendEmailBtn" class="btn btn-success flex-grow-1" disabled>Wyślij e-mail</button>
+                    </div>
                     <div id="sendStatus" class="mt-3"></div>
                 </div>
             </div>
@@ -120,16 +138,18 @@
         <div class="modal-dialog">
             <div class="modal-content border-warning">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="imageModalLabel">⚠️ Wykryto podejrzany plik!</h5>
+                    <h5 class="modal-title" id="imageModalLabel">⚠️ Wykryto obrazek w sortowni!</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    W sortowni pojawił się jakiś podejrzany typ identyfikujący się jako obrazek. Sprawdź czy go nie trzeba przyciąć!
+                    Co chcesz zrobić z tym plikiem?
                     <p class="text-muted mt-2" id="imageFoundFilename"></p>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" id="cropWaitBtn" class="btn btn-secondary" data-bs-dismiss="modal">Czekaj, obcinam</button>
-                    <button type="button" id="convertNowBtn" class="btn btn-warning">Gotowe, prostuj go!</button>
+                <div class="modal-footer d-grid gap-2">
+                    <button type="button" id="showImageBtn" class="btn btn-info">Pokaż go!</button>
+                    <button type="button" id="openInGimpBtn" class="btn btn-dark">Przycinamy! (Otwórz w GIMP)</button>
+                    <button type="button" id="convertNowBtn" class="btn btn-warning">Prostujemy na PDF!</button>
+                    <button type="button" id="leaveImageBtn" class="btn btn-secondary" data-bs-dismiss="modal">Zostawiamy jak jest</button>
                 </div>
             </div>
         </div>
@@ -153,9 +173,38 @@
             </div>
         </div>
     </div>
+
+    <div class="modal fade" id="fileManagerModal" tabindex="-1" aria-labelledby="fileManagerLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="fileManagerLabel">Zarządzanie plikami w "pakowalni"</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <ul id="fileManagerList" class="list-group">
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="zipManagerModal" tabindex="-1" aria-labelledby="zipManagerLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="zipManagerLabel">Zarządzanie archiwami w "ZIP Skład"</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="accordion" id="zipManagerAccordion">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="script.js"></script>
 </body>
-
 </html>

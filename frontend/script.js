@@ -1,3 +1,11 @@
+// Polyfill dla path.extname w przeglądarce
+const path = {
+    extname: (p) => {
+        const i = p.lastIndexOf('.');
+        return i < 0 ? '' : p.slice(i);
+    }
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     // Referencje do elementów DOM
     const fileSelect = document.getElementById('fileSelect');
@@ -10,22 +18,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const imageUpload = document.getElementById('imageUpload');
     const convertBtn = document.getElementById('convertBtn');
     const addToZipBtn = document.getElementById('addToZipBtn');
+    const customNameBtn = document.getElementById('customNameBtn');
+    const showPackedFilesBtn = document.getElementById('showPackedFilesBtn');
+    const fileManagerList = document.getElementById('fileManagerList');
+    const showZipManagerBtn = document.getElementById('showZipManagerBtn');
+    const zipManagerAccordion = document.getElementById('zipManagerAccordion');
+    
+    // Modale
     const zipSelectModalEl = document.getElementById('zipSelectModal');
     const zipSelectModal = new bootstrap.Modal(zipSelectModalEl);
     const zipFileSelect = document.getElementById('zipFileSelect');
     const confirmAddToZipBtn = document.getElementById('confirmAddToZipBtn');
-
-    // Modale
     const monthSelectModalEl = document.getElementById('monthSelectModal');
     const monthSelectModal = new bootstrap.Modal(monthSelectModalEl);
     const monthInput = document.getElementById('monthInput');
     const confirmPackBtn = document.getElementById('confirmPackBtn');
-    
     const imageFoundModalEl = document.getElementById('imageFoundModal');
     const imageFoundModal = new bootstrap.Modal(imageFoundModalEl);
     const imageFoundFilenameEl = document.getElementById('imageFoundFilename');
-    const cropWaitBtn = document.getElementById('cropWaitBtn');
+    const showImageBtn = document.getElementById('showImageBtn');
+    const openInGimpBtn = document.getElementById('openInGimpBtn');
+    const leaveImageBtn = document.getElementById('leaveImageBtn');
     const convertNowBtn = document.getElementById('convertNowBtn');
+    const fileManagerModalEl = document.getElementById('fileManagerModal');
+    const fileManagerModal = new bootstrap.Modal(fileManagerModalEl);
+    const zipManagerModalEl = document.getElementById('zipManagerModal');
+    const zipManagerModal = new bootstrap.Modal(zipManagerModalEl);
     
     const requiredInvoiceItems = [
         'superdevs', 'congitva', 'cognitiva przelew netto',
@@ -35,8 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let missingItemsState = [];
     let latestZipFile = null;
-
-    // --- DEFINICJE FUNKCJI ---
+    let ignoredImages = [];
 
     const showStatus = (targetId, message, isError = false) => {
         const statusDiv = document.getElementById(targetId);
@@ -51,12 +68,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('http://localhost:3000/api/get-packed-files');
             if (!response.ok) throw new Error('Błąd serwera przy pobieraniu spakowanych plików.');
             const packedFiles = await response.json();
-            
             missingItemsState = requiredInvoiceItems.filter(requiredItem => {
                 const normalizedRequired = requiredItem.toLowerCase().replace(/ /g, '-');
                 return !packedFiles.some(packedFile => packedFile.toLowerCase().includes(normalizedRequired));
             });
-
             missingInvoicesList.innerHTML = '';
             if (missingItemsState.length === 0) {
                 missingInvoicesList.innerHTML = '<li class="list-group-item list-group-item-success">Wszystkie obowiązkowe faktury są w pakowalni! ✅</li>';
@@ -98,21 +113,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return;
             }
-            const pdfFiles = files.filter(file => path.extname(file).toLowerCase() === '.pdf');
-            const otherImageFiles = files.filter(file => {
+            const displayFiles = files.filter(file => {
                 const ext = path.extname(file).toLowerCase();
-                return ext === '.png' || ext === '.jpg' || ext === '.jpeg';
+                return ['.pdf', '.png', '.jpg', '.jpeg'].includes(ext);
             });
             fileSelect.innerHTML = '<option selected disabled>Wybierz plik...</option>';
-            pdfFiles.forEach(file => {
+            displayFiles.forEach(file => {
                 const option = document.createElement('option');
                 option.value = file;
                 option.textContent = file;
                 fileSelect.appendChild(option);
             });
+            const otherImageFiles = displayFiles.filter(file => !file.toLowerCase().endsWith('.pdf') && !ignoredImages.includes(file));
             if (otherImageFiles.length > 0) {
                 const imageToProcess = otherImageFiles[0];
                 imageFoundFilenameEl.textContent = `Plik: ${imageToProcess}`;
+                showImageBtn.dataset.filename = imageToProcess; 
+                openInGimpBtn.dataset.filename = imageToProcess; 
                 convertNowBtn.dataset.filename = imageToProcess; 
                 imageFoundModal.show();
             }
@@ -121,7 +138,90 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // --- LOGIKA PRZYCISKÓW I ZDARZEŃ ---
+    const renderFileManager = (files) => {
+        fileManagerList.innerHTML = '';
+        if (files.length === 0) {
+            fileManagerList.innerHTML = '<li class="list-group-item">Folder "pakowalnia" jest pusty.</li>';
+            return;
+        }
+        files.forEach(filename => {
+            const isImage = ['.jpg', '.jpeg', '.png'].includes(path.extname(filename).toLowerCase());
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center flex-wrap';
+            li.innerHTML = `
+                <span class="me-3">${filename}</span>
+                <div class="file-actions btn-group mt-2 mt-sm-0" role="group">
+                    <button class="btn btn-sm btn-outline-secondary" title="Cofnij do sortowni" data-action="move" data-filename="${filename}"><i class="bi bi-arrow-return-left"></i></button>
+                    <button class="btn btn-sm btn-outline-danger" title="Usuń" data-action="delete" data-filename="${filename}"><i class="bi bi-trash"></i></button>
+                    <button class="btn btn-sm btn-outline-info" title="Zmień nazwę" data-action="rename" data-filename="${filename}"><i class="bi bi-pencil-square"></i></button>
+                    <button class="btn btn-sm btn-outline-primary" title="Pokaż" data-action="show" data-filename="${filename}"><i class="bi bi-eye"></i></button>
+                    <button class="btn btn-sm btn-outline-success" title="Dodaj do ZIPa" data-action="add-to-zip" data-filename="${filename}"><i class="bi bi-file-earmark-zip"></i></button>
+                    ${isImage ? `<button class="btn btn-sm btn-outline-dark" title="Przytnij (GIMP)" data-action="gimp" data-filename="${filename}"><i class="bi bi-scissors"></i></button>` : ''}
+                </div>
+            `;
+            fileManagerList.appendChild(li);
+        });
+    };
+
+    const renderZipManager = async () => {
+        try {
+            const zipFiles = await fetch('http://localhost:3000/api/get-zips').then(res => res.json());
+            zipManagerAccordion.innerHTML = '';
+            if (zipFiles.length === 0) {
+                zipManagerAccordion.innerHTML = '<p>Brak archiwów w folderze ZIP Skład.</p>';
+                return;
+            }
+            let accordionHtml = '';
+            for (const zipFilename of zipFiles) {
+                const contentsResponse = await fetch(`http://localhost:3000/api/get-zip-contents?zipFilename=${encodeURIComponent(zipFilename)}`);
+                const contents = await contentsResponse.json();
+                const accordionItemId = `zip-${zipFilename.replace(/[^a-zA-Z0-9]/g, '')}`;
+                let contentHtml = '<ul class="list-group list-group-flush">';
+                if (contents.length > 0) {
+                    contents.forEach(entry => {
+                        const isImage = !entry.isDirectory && ['.jpg', '.jpeg', '.png'].includes(path.extname(entry.name).toLowerCase());
+                        contentHtml += `
+                            <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap">
+                                <span class="me-2"><i class="bi ${entry.isDirectory ? 'bi-folder' : 'bi-file-earmark-text'} me-2"></i>${entry.name}</span>
+                                ${!entry.isDirectory ? `
+                                <div class="btn-group" role="group">
+                                    <button class="btn btn-sm btn-outline-primary" title="Pokaż" data-action="view-in-zip" data-zip-filename="${zipFilename}" data-internal-filename="${entry.name}"><i class="bi bi-eye"></i></button>
+                                    <button class="btn btn-sm btn-outline-secondary" title="Wypakuj do sortowni" data-action="extract-file" data-zip-filename="${zipFilename}" data-internal-filename="${entry.name}"><i class="bi bi-box-arrow-down"></i></button>
+                                    ${isImage ? `<button class="btn btn-sm btn-outline-dark" title="Przytnij (GIMP)" data-action="gimp-from-zip" data-zip-filename="${zipFilename}" data-internal-filename="${entry.name}"><i class="bi bi-scissors"></i></button>` : ''}
+                                    <button class="btn btn-sm btn-outline-danger" title="Usuń z ZIPa" data-action="delete-from-zip" data-zip-filename="${zipFilename}" data-internal-filename="${entry.name}"><i class="bi bi-trash"></i></button>
+                                </div>` : ''}
+                            </li>`;
+                    });
+                } else {
+                    contentHtml += '<li class="list-group-item">Archiwum jest puste.</li>';
+                }
+                contentHtml += '</ul>';
+                accordionHtml += `
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#${accordionItemId}">
+                                ${zipFilename}
+                            </button>
+                        </h2>
+                        <div id="${accordionItemId}" class="accordion-collapse collapse" data-bs-parent="#zipManagerAccordion">
+                            <div class="accordion-body">
+                                ${contentHtml}
+                                <div class="mt-3">
+                                    <button class="btn btn-sm btn-info" data-action="rename-zip" data-filename="${zipFilename}">Zmień nazwę</button>
+                                    <button class="btn btn-sm btn-secondary" data-action="extract-zip" data-filename="${zipFilename}">Wypakuj do sortowni</button>
+                                    <button class="btn btn-sm btn-danger" data-action="delete-zip" data-filename="${zipFilename}">Usuń ZIPa</button>
+                                    <button class="btn btn-sm btn-warning" data-action="check-missing" data-filename="${zipFilename}">Pokaż czego brakuje</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+            }
+            zipManagerAccordion.innerHTML = accordionHtml;
+        } catch(error) {
+            console.error(error);
+            zipManagerAccordion.innerHTML = '<div class="alert alert-danger">Nie udało się załadować listy archiwów.</div>';
+        }
+    };
 
     processBtn.addEventListener('click', async () => {
         const data = {
@@ -151,6 +251,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    customNameBtn.addEventListener('click', async () => {
+        const originalFilename = fileSelect.value;
+        if (!originalFilename || originalFilename === 'Wybierz plik...') {
+            showStatus('processStatus', 'Najpierw wybierz plik z listy!', true);
+            return;
+        }
+        const customFilename = prompt('Wprowadź pełną, niestandardową nazwę pliku:', originalFilename);
+        if (!customFilename) {
+            return;
+        }
+        try {
+            const response = await fetch('http://localhost:3000/api/custom-rename', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ originalFilename, customFilename })
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message);
+            showStatus('processStatus', result.message, false);
+            loadFiles();
+            updateMissingInvoices();
+        } catch (error) {
+            showStatus('processStatus', `Błąd: ${error.message}`, true);
+        }
+    });
+
     packBtn.addEventListener('click', () => {
         if (missingItemsState.length > 0) {
             const userConfirmation = confirm("W pakowalni brakuje obowiązkowych plików, czy na pewno chcesz przykoksić mordo?");
@@ -175,12 +301,12 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const result = await response.json();
             if (!response.ok) throw new Error(result.message || 'Błąd serwera.');
-            
             showStatus('packStatus', result.message, false);
             latestZipFile = result.zipFilename;
             sendEmailBtn.disabled = false;
             setTimeout(() => {
                 updateMissingInvoices();
+                fileManagerList.innerHTML = '<li class="list-group-item">Folder "pakowalnia" jest pusty.</li>';
             }, 1000);
         } catch (error) {
             showStatus('packStatus', `Błąd podczas pakowania plików: ${error.message}`, true);
@@ -201,7 +327,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const result = await response.json();
             if (!response.ok) throw new Error(result.message || 'Błąd serwera.');
-            
             showStatus('sendStatus', result.message, false);
             sendEmailBtn.disabled = true;
             latestZipFile = null;
@@ -226,7 +351,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const result = await response.json();
             if (!response.ok) throw new Error(result.message || 'Błąd serwera.');
-            
             showStatus('convertStatus', result.message, false);
             imageUpload.value = '';
             loadFiles();
@@ -235,7 +359,36 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    cropWaitBtn.addEventListener('click', () => {
+    showImageBtn.addEventListener('click', () => {
+        const filename = showImageBtn.dataset.filename;
+        if (!filename) return;
+        const encodedFile = filename.split('/').map(encodeURIComponent).join('/');
+        const fileUrl = `http://localhost:3000/files/${encodedFile}`;
+        window.open(fileUrl, '_blank');
+    });
+
+    openInGimpBtn.addEventListener('click', async () => {
+        const filename = openInGimpBtn.dataset.filename;
+        if (!filename) return;
+        try {
+            const response = await fetch('http://localhost:3000/api/open-in-gimp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename, folder: 'sortownia' })
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message);
+            showStatus('processStatus', result.message, false);
+        } catch (error) {
+            showStatus('processStatus', `Błąd: ${error.message}`, true);
+        }
+    });
+
+    leaveImageBtn.addEventListener('click', () => {
+        const filename = showImageBtn.dataset.filename;
+        if (filename) {
+            ignoredImages.push(filename);
+        }
         imageFoundModal.hide();
     });
 
@@ -265,6 +418,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const encodedFile = selectedFile.split('/').map(encodeURIComponent).join('/');
             const fileUrl = `http://localhost:3000/files/${encodedFile}`;
             window.open(fileUrl, '_blank');
+            const isProcessable = ['.pdf', '.png', '.jpg', '.jpeg'].includes(path.extname(selectedFile).toLowerCase());
+            processBtn.disabled = !isProcessable;
+            addToZipBtn.disabled = !isProcessable;
+            customNameBtn.disabled = !isProcessable;
+        } else {
+            processBtn.disabled = true;
+            addToZipBtn.disabled = true;
+            customNameBtn.disabled = true;
         }
     });
 
@@ -329,26 +490,175 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // NOWY BLOK KODU - WYMUSZENIE POKAZANIA KALENDARZA
     invoiceDateInput.addEventListener('click', () => {
         try {
             invoiceDateInput.showPicker();
         } catch (error) {
-            // W przeglądarkach, które nie wspierają showPicker(),
-            // błąd zostanie zignorowany, a pole zachowa swoje standardowe działanie.
             console.log('Twoja przeglądarka nie wspiera showPicker().');
         }
     });
 
-    // Inicjalizacja przy starcie aplikacji
+    showPackedFilesBtn.addEventListener('click', async () => {
+        try {
+            const packedFiles = await fetch('http://localhost:3000/api/get-packed-files').then(res => res.json());
+            renderFileManager(packedFiles);
+            fileManagerModal.show();
+        } catch (error) {
+            showStatus('packStatus', 'Nie udało się załadować plików z pakowalni.', true);
+        }
+    });
+
+    fileManagerList.addEventListener('click', async (event) => {
+        const button = event.target.closest('button');
+        if (!button) return;
+        const action = button.dataset.action;
+        const filename = button.dataset.filename;
+        let shouldRefresh = true;
+        try {
+            switch(action) {
+                case 'move':
+                    if (confirm(`Czy na pewno chcesz cofnąć plik "${filename}" do sortowni?`)) {
+                        await fetch('/api/move-to-sortownia', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filename}) });
+                    } else { shouldRefresh = false; }
+                    break;
+                case 'delete':
+                    if (confirm(`CZY NA PEWNO chcesz trwale usunąć plik "${filename}"?`)) {
+                        await fetch('/api/delete-file', { method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filename, folder: 'pakowalnia'}) });
+                    } else { shouldRefresh = false; }
+                    break;
+                case 'rename':
+                    const newName = prompt(`Wprowadź nową nazwę dla pliku "${filename}":`, filename);
+                    if (newName && newName !== filename) {
+                        await fetch('/api/rename-packed-file', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({oldFilename: filename, newFilename: newName}) });
+                    } else { shouldRefresh = false; }
+                    break;
+                case 'show':
+                    window.open(`http://localhost:3000/packed/${encodeURIComponent(filename)}`, '_blank');
+                    shouldRefresh = false;
+                    break;
+                case 'add-to-zip':
+                    const zipFiles = await fetch('/api/get-zips').then(res => res.json());
+                    if (zipFiles.length === 0) { alert('Brak dostępnych archiwów ZIP.'); shouldRefresh = false; break; }
+                    zipFileSelect.innerHTML = '';
+                    zipFiles.forEach(zipFile => {
+                        const option = document.createElement('option');
+                        option.value = zipFile;
+                        option.textContent = zipFile;
+                        zipFileSelect.appendChild(option);
+                    });
+                    const handleConfirm = async () => {
+                        await fetch('/api/add-packed-to-zip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({packedFilename: filename, zipFilename: zipFileSelect.value}) });
+                        zipSelectModal.hide();
+                        const updatedFiles = await fetch('http://localhost:3000/api/get-packed-files').then(res => res.json());
+                        renderFileManager(updatedFiles);
+                    };
+                    confirmAddToZipBtn.addEventListener('click', handleConfirm, {once: true});
+                    zipSelectModal.show();
+                    shouldRefresh = false;
+                    break;
+                case 'gimp':
+                    await fetch('/api/open-in-gimp', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filename, folder: 'pakowalnia'}) });
+                    shouldRefresh = false;
+                    break;
+            }
+            if (shouldRefresh) {
+                const updatedFiles = await fetch('http://localhost:3000/api/get-packed-files').then(res => res.json());
+                renderFileManager(updatedFiles);
+                updateMissingInvoices();
+                loadFiles();
+            }
+        } catch (error) {
+            showStatus('packStatus', `Wystąpił błąd: ${error.message}`, true);
+        }
+    });
+
+    showZipManagerBtn.addEventListener('click', () => {
+        renderZipManager();
+        zipManagerModal.show();
+    });
+
+    zipManagerAccordion.addEventListener('click', async (event) => {
+        const button = event.target.closest('button');
+        if (!button || !button.dataset.action) return;
+
+        const action = button.dataset.action;
+        const zipFilename = button.dataset.filename || button.dataset.zipFilename;
+        const internalFilename = button.dataset.internalFilename;
+        let shouldRefresh = true;
+        let shouldRefreshAll = false;
+
+        try {
+            switch(action) {
+                case 'delete-zip':
+                    if (confirm(`CZY NA PEWNO chcesz trwale usunąć całe archiwum "${zipFilename}"?`)) {
+                        await fetch('/api/delete-zip', { method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({zipFilename}) });
+                    } else { shouldRefresh = false; }
+                    break;
+                case 'extract-zip':
+                    if (confirm(`Czy na pewno chcesz wypakować całą zawartość "${zipFilename}" do sortowni?`)) {
+                        await fetch('/api/extract-zip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({zipFilename}) });
+                        zipManagerModal.hide();
+                        shouldRefreshAll = true;
+                    }
+                    shouldRefresh = false;
+                    break;
+                case 'rename-zip':
+                    const newZipName = prompt('Wprowadź nową nazwę dla archiwum:', zipFilename);
+                    if(newZipName && newZipName !== zipFilename) {
+                        await fetch('/api/rename-zip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({oldZipFilename: zipFilename, newZipFilename: newZipName}) });
+                    } else { shouldRefresh = false; }
+                    break;
+                case 'check-missing':
+                    const contents = await fetch(`http://localhost:3000/api/get-zip-contents?zipFilename=${encodeURIComponent(zipFilename)}`).then(res => res.json());
+                    const zipContents = contents.map(c => c.name);
+                    const missingInZip = requiredInvoiceItems.filter(requiredItem => {
+                        const normalizedRequired = requiredItem.toLowerCase().replace(/ /g, '-');
+                        return !zipContents.some(zipFile => zipFile.toLowerCase().includes(normalizedRequired));
+                    });
+                    if (missingInZip.length > 0) {
+                        alert(`W tym archiwum brakuje:\n\n- ${missingInZip.join('\n- ')}`);
+                    } else {
+                        alert('Wszystkie obowiązkowe pliki są w tym archiwum. Jesteś debeściak!');
+                    }
+                    shouldRefresh = false;
+                    break;
+                case 'view-in-zip':
+                    window.open(`http://localhost:3000/api/view-file-in-zip?zipFilename=${encodeURIComponent(zipFilename)}&internalFilename=${encodeURIComponent(internalFilename)}`, '_blank');
+                    shouldRefresh = false;
+                    break;
+                case 'extract-file':
+                    if (confirm(`Wypakować plik "${internalFilename}" do sortowni?`)) {
+                        await fetch('/api/extract-single-file', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({zipFilename, internalFilename}) });
+                        shouldRefreshAll = true;
+                    }
+                    shouldRefresh = false;
+                    break;
+                case 'gimp-from-zip':
+                    alert('Funkcja otwierania w GIMP bezpośrednio z archiwum nie jest jeszcze zaimplementowana.');
+                    shouldRefresh = false;
+                    break;
+                case 'delete-from-zip':
+                    if (confirm(`Usunąć plik "${internalFilename}" z tego archiwum ZIP?`)) {
+                        await fetch('/api/delete-file-from-zip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({zipFilename, internalFilename}) });
+                    } else { shouldRefresh = false; }
+                    break;
+            }
+            if (shouldRefresh) {
+                renderZipManager();
+            }
+            if (shouldRefreshAll) {
+                loadFiles();
+                updateMissingInvoices();
+            }
+        } catch (error) {
+            showStatus('sendStatus', `Wystąpił błąd: ${error.message}`, true);
+        }
+    });
+
+    // Inicjalizacja
     loadFiles();
     updateMissingInvoices();
+    processBtn.disabled = true;
+    addToZipBtn.disabled = true;
+    customNameBtn.disabled = true;
 });
-
-// Polyfill dla path.extname w przeglądarce
-const path = {
-    extname: (p) => {
-        const i = p.lastIndexOf('.');
-        return i < 0 ? '' : p.slice(i);
-    }
-};
